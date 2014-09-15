@@ -1,0 +1,576 @@
+
+////////////////////////////////////////////////////////
+//Define libraries
+////////////////////////////////////////////////////////
+
+// The SFE_LSM9DS0 requires both the SPI and Wire libraries.
+// Unfortunately, you'll need to include both in the Arduino
+// sketch, before including the SFE_LSM9DS0 library.
+
+#include <SPI.h> // Included for SFE_LSM9DS0 library
+#include <Wire.h>
+#include <SFE_LSM9DS0.h>
+
+// Servo library is required for sending high frequency PWM
+// signals to the ESCs.
+#include <Servo.h>
+
+// SDO_XM and SDO_G are both grounded, so our addresses are:
+#define LSM9DS0_XM  0x1D // Would be 0x1E if SDO_XM is LOW
+#define LSM9DS0_G   0x6B // Would be 0x6A if SDO_G is LOW
+// Create an instance of the LSM9DS0 library called `dof` the
+// parameters for this constructor are:
+// [SPI or I2C Mode declaration],[gyro I2C address],[xm I2C add.]
+
+LSM9DS0 dof(MODE_I2C, LSM9DS0_G, LSM9DS0_XM);
+
+////////////////////////////////////////////////////////
+//Define variables
+////////////////////////////////////////////////////////
+  
+//ESC variables
+Servo ESCRightFront;
+Servo ESCLeftFront;
+Servo ESCRightBack;
+Servo ESCLeftBack;
+
+//System variables
+int printCounter = 0;
+long sampleTime;
+long sampleTimeOld;
+
+//DOF sensor variables
+float sensorYaw;
+float sensorPitch;
+float sensorRoll;
+
+float gx;
+float gy;
+float gz;
+float ax;
+float ay;
+float az;
+float mx;
+float my;
+float mz;
+
+//Transmitter variables
+int pulseInSwitcher = 1;
+
+int adressThrottle = 8;
+
+long transmitterThrottleRaw = 0;
+long transmitterThrottleMapped = 0;
+
+int adressPitch = 0;
+long transmitterPitchRaw = 0;
+long transmitterPitchMapped = 0;
+
+int adressRoll = 0;
+long transmitterRollRaw = 0;
+long transmitterRollMapped = 0;
+
+int adressYaw = 0;
+long transmitterYawRaw = 0;
+long transmitterYawMapped = 0;
+
+int adressChannel5 = 0;
+boolean transmitterChannel5 = 0;
+
+float filterFactorTransmitter = 5;
+
+//Transmitter filter variables
+long transmitterThrottleFiltered = 0;
+long transmitterPitchFiltered = 0;
+long transmitterRollFiltered = 0;
+long transmitterYawFiltered = 0;
+  
+//PID variables
+float errorPitch;
+float errorRoll;
+float errorYaw;
+
+float errorPitchOld = 0;
+float errorRollOld = 0;
+float errorYawOld = 0;
+  
+float PIDPitch;
+float PIDRoll;
+float PIDYaw;
+
+float KpPitch = 0;
+float KiPitch = 0;
+float KdPitch = 0;
+
+float KpRoll = 0;
+float KiRoll = 0;
+float KdRoll = 0;
+
+float KpYaw = 0;
+float KiYaw = 0;
+float KdYaw = 0;
+
+float integralPitch = 0;
+float integralRoll = 0;
+float integralYaw = 0;
+
+float PpartPitch;
+float PpartRoll;
+float PpartYaw;
+float IpartPitch;
+float IpartRoll;
+float IpartYaw;
+float DpartPitch;
+float DpartRoll;
+float DpartYaw;
+
+int controlSignalRightFront;
+int controlSignalLeftFront;
+int controlSignalRightBack;
+int controlSignalLeftBack;
+
+float filterFactorDPart = 1;
+
+void setup()
+{
+  //Code in setup() function will only execute once, when power is supplied to
+  //the CPU, when restarted or when new firmware is loaded
+  
+  ////////////////////////////////////////////////////////
+  //System setup
+  ////////////////////////////////////////////////////////
+  
+  Serial.begin(57600); // Start serial at 9600 bps
+  sampleTimeOld = millis();
+  
+  ////////////////////////////////////////////////////////
+  //Initiate the DOF sensor
+  ////////////////////////////////////////////////////////
+  
+  // Use the begin() function to initialize the LSM9DS0 library.
+  uint16_t statusDof = dof.begin();
+  
+  // begin() returns a 16-bit value which includes both the gyro 
+  // and accelerometers WHO_AM_I response. You can check this to
+  // make sure communication was successful.
+  Serial.print("LSM9DS0 WHO_AM_I's returned: 0x");
+  Serial.println(statusDof, HEX);
+  Serial.println("Should be 0x49D4");
+  Serial.println();
+  
+  ////////////////////////////////////////////////////////
+  //Initiate the ESCs
+  ////////////////////////////////////////////////////////
+  
+  //-- //Declare the adress (pin) of the front right ESC
+  //-- //Declare the adress (pin) of the front left ESC
+  //-- //Declare the adress (pin) of the back right ESC
+  //-- //Declare the adress (pin) of the back left ESC
+  
+  //-- //Start with zero speed command to the front right ESC
+  //-- //Start with zero speed command to the front left ESC
+  //-- //Start with zero speed command to the back right ESC
+  //-- //Start with zero speed command to the back left ESC
+  
+}
+
+void loop()
+{
+  //Code in loop() function will execute repeatedly for as long as the CPU has power
+  
+  ////////////////////////////////////////////////////////
+  //Read the sensor values
+  ////////////////////////////////////////////////////////
+  
+  // To read from the gyroscope, you must first call the
+  // readGyro() function. When this exits, it'll update the
+  // gx, gy, and gz variables with the most current data.
+  //--
+  dof.readGyro();
+  // To read from the accelerometer, you must first call the
+  // readAccel() function. When this exits, it'll update the
+  // ax, ay, and az variables with the most current data.
+  //--
+ dof.readAccel(); 
+  // To read from the magnetometer, you must first call the
+  // readMag() function. When this exits, it'll update the
+  // mx, my, and mz variables with the most current data.
+  //--
+  dof.readMag();
+  ////////////////////////////////////////////////////////
+  //Sensor value mapping
+  ////////////////////////////////////////////////////////
+  
+  gx = map(dof.gx,-32768,32768,-245,245);
+  gy = map(dof.gy,-32768,32768,-245,245);
+  gz = map(dof.gz,-32768,32768,-245,245);
+  ax = map(dof.ax,-32768,32768,-1000,1000);
+  ay = map(dof.ay,-32768,32768,-1000,1000);
+  az = map(dof.az,-32768,32768,-1000,1000);
+  mx = map(dof.mx,-32768,32768,-1000,1000);
+  my = map(dof.my,-32768,32768,-1000,1000);
+  mz = map(dof.my,-32768,32768,-1000,1000);
+ 
+ 
+  ////////////////////////////////////////////////////////
+  //Interpret and calibrate sensor values  (Tolka och Kalibrera) Grader/sekund
+  ////////////////////////////////////////////////////////
+
+  //-- sensorPitch = ;
+
+  sensorPitch += 0;  // sensorPitch = sensorpitch + 0;
+  
+  //-- sensorRoll = ;
+  
+  sensorRoll += 0;
+  
+  //-- sensorYaw = ;
+  
+  sensorYaw += 0;
+    
+  ////////////////////////////////////////////////////////
+  //Read transmitter values
+  ////////////////////////////////////////////////////////
+  
+  switch (pulseInSwitcher) {      
+    case 1:
+   transmitterThrottleRaw = pulseIn(adressThrottle, HIGH);
+      break;
+    case 3:
+      transmitterPitchRaw = pulseIn(adressPitch, HIGH, 500);
+      break;
+    case 5:
+     transmitterRollRaw = pulseIn(adressRoll, HIGH, 500);
+      break;
+    case 7:
+     transmitterYawRaw = pulseIn(adressYaw, HIGH, 500);
+      break;
+  }
+  
+  ////////////////////////////////////////////////////////
+  //Transmitter filters
+  ////////////////////////////////////////////////////////
+
+  switch (pulseInSwitcher) {      
+    case 1:
+     transmitterThrottleFiltered = (transmitterThrottleFiltered * (filterFactorTransmitter-1) + transmitterThrottleRaw)/filterFactorTransmitter;
+      break;
+    case 3:
+      transmitterPitchFiltered = (transmitterPitchFiltered * (filterFactorTransmitter-1) + transmitterPitchRaw)/filterFactorTransmitter;
+      break;
+    case 5:
+      transmitterRollFiltered = (transmitterRollFiltered * (filterFactorTransmitter-1) + transmitterRollRaw)/filterFactorTransmitter;
+      break;
+    case 7:
+      transmitterYawFiltered = (transmitterYawFiltered * (filterFactorTransmitter-1) + transmitterYawRaw)/filterFactorTransmitter;
+      break;
+  }
+  
+  ////////////////////////////////////////////////////////
+  //Transmitter value mapping
+  ////////////////////////////////////////////////////////
+  
+  switch (pulseInSwitcher) {      
+    case 1:
+      transmitterThrottleMapped = map(transmitterThrottleFiltered,1060,1915,0,2000);
+      break;
+    case 3:
+      transmitterPitchMapped = map(transmitterPitchFiltered,-32768,32768,0,2000);
+      break;
+    case 5:
+      transmitterRollMapped = map(transmitterRollFiltered,-32768,32768,0,2000);
+      break;
+    case 7:
+      transmitterYawMapped = map(transmitterYawFiltered,-32768,32768,0,2000);
+      break;
+  }
+  
+  ////////////////////////////////////////////////////////
+  //System update
+  ////////////////////////////////////////////////////////
+  
+  printCounter++;
+  sampleTime = millis() - sampleTimeOld;
+  sampleTimeOld = millis();
+  pulseInSwitcher++;
+  if (pulseInSwitcher > 8) {
+    pulseInSwitcher = 1;
+  }
+  
+  ////////////////////////////////////////////////////////
+  //PID regulators
+  ////////////////////////////////////////////////////////
+  
+  //Regulator errors
+  errorPitch = transmitterPitchMapped - sensorPitch;
+  errorRoll = transmitterRollMapped - sensorRoll;
+  errorYaw = errorYaw = transmitterYawMapped - sensorYaw;
+  
+  //P-part
+  PpartPitch = KpPitch * errorPitch;
+  PpartRoll = PpartRoll = KpRoll * errorRoll;
+  PpartYaw = PpartYaw = KpYaw * errorYaw;
+  
+  //I-part
+  //Update integrals
+       integralPitch = integralPitch + errorPitch * sampleTime;
+  //-- integralRoll = KpRoll * sampleTime;
+  //-- integralYaw = KpYaw * sampleTime;
+  
+       IpartPitch = KiPitch * integralPitch * errorPitch * sampleTime;
+  //-- IpartRoll = ;
+  //-- IpartYaw = ;
+  
+  //Integral saturation
+  /*
+  if (IpartPitch > ) {
+    IpartPitch = ;
+  }
+  else if (IpartPitch < ) {
+    IpartPitch = ;
+  }
+  if (IpartRoll > ) {
+    IpartRoll = ;
+  }
+  else if (IpartRoll < ) {
+    IpartRoll = ;
+  }
+  if (IpartYaw > ) {
+    IpartYaw = ;
+  }
+  else if (IpartYaw < ) {
+    IpartYaw = ;
+  }
+  */
+  
+  //Reset integrals
+  /*
+  if (transmitterThrottleMapped < ) {
+    integralPitch = 0;
+    integralRoll = 0;
+    integralYaw = 0;
+  }
+  */
+  
+  //D-part
+  //-- DpartPitch = (float) ;
+  //-- DpartRoll = (float) ;
+  //-- DpartYaw = (float) ;  
+  
+  //Update regulators
+  //-- PIDPitch = ;
+  //-- PIDRoll = ;
+  //-- PIDYaw = ;
+  
+  //Update derivatives
+  /*
+  errorPitchOld = errorPitch;
+  errorRollOld = errorRoll;
+  errorYawOld = errorYaw;
+  */
+  
+  ////////////////////////////////////////////////////////
+  //Control signals
+  ////////////////////////////////////////////////////////
+  
+  //-- controlSignalRightFront = (int) ;
+  //-- controlSignalLeftFront = (int) ;
+  //-- controlSignalRightBack = (int) ;
+  //-- controlSignalLeftBack = (int) ;
+  
+  ////////////////////////////////////////////////////////
+  //Control signal saturation check
+  ////////////////////////////////////////////////////////
+  
+  /*
+  if (controlSignalRightFront > ) {
+    controlSignalRightFront = ;
+  }
+  else if (controlSignalRightFront < ) {
+    controlSignalRightFront = ;
+  }
+  if (controlSignalLeftFront > ) {
+    controlSignalLeftFront = ;
+  }
+  else if (controlSignalLeftFront < ) {
+    controlSignalLeftFront = ;
+  }
+  if (controlSignalRightBack > ) {
+    controlSignalRightBack = ;
+  }
+  else if (controlSignalRightBack < ) {
+    controlSignalRightBack = ;
+  }
+  if (controlSignalLeftBack > ) {
+    controlSignalLeftBack = ;
+  }
+  else if (controlSignalLeftBack < ) {
+    controlSignalLeftBack = ;
+  }
+  */
+  
+  ////////////////////////////////////////////////////////
+  //Safety functions
+  ////////////////////////////////////////////////////////
+   
+   /*
+   if (transmitterThrottleMapped < ) {
+     controlSignalRightFront = ;
+     controlSignalLeftFront = ;
+     controlSignalRightBack = ;
+     controlSignalLeftBack = ;
+   }
+   */
+     
+  ////////////////////////////////////////////////////////
+  //ESC control signal write
+  ////////////////////////////////////////////////////////
+ 
+  //-- //Write speed command to the front right ESC
+  //-- //Write speed command to the front left ESC
+  //-- //Write speed command to the back right ESC
+  //-- //Write speed command to the back left ESC
+  
+  ////////////////////////////////////////////////////////
+  //Print signal values
+  ////////////////////////////////////////////////////////
+  
+  if (printCounter == 99) {
+   /* 
+    Serial.print("G: ");
+    Serial.print(gx);
+    Serial.print(", ");
+    Serial.print(gy);
+    Serial.print(", ");
+    Serial.println(gz);
+    Serial.print("A: ");
+    Serial.print(ax);
+    Serial.print(", ");
+    Serial.print(ay);
+    Serial.print(", ");
+    Serial.println(az);
+    Serial.print("M: ");
+    Serial.print(mx);
+    Serial.print(", ");
+    Serial.print(my);
+    Serial.print(", ");
+    Serial.println(mz);
+    /*
+    Serial.print("DOF Yaw: ");
+    Serial.println(sensorYaw);
+    Serial.print("DOF Pitch: ");
+    Serial.println(sensorPitch);
+    Serial.print("DOF Roll: ");
+    Serial.println(sensorRoll);
+   */
+    Serial.print("Transmitter Thriottle Raw: ");
+    Serial.println(transmitterThrottleRaw);
+    Serial.print("Transmitter Throttle: ");
+    Serial.print(transmitterThrottleFiltered);
+    Serial.print(", ");
+    Serial.println(transmitterThrottleMapped);
+    Serial.println(" ");
+/*  
+    Serial.print("Transmitter Pitch: ");
+    Serial.print(transmitterPitchFiltered);
+    Serial.print(", ");
+    Serial.println(transmitterPitchMapped);
+
+    Serial.print("Transmitter Roll: ");
+    Serial.print(transmitterRollFiltered);
+    Serial.print(", ");
+    Serial.println(transmitterRollMapped);
+    Serial.print("Transmitter Yaw: ");
+    Serial.print(transmitterYawFiltered);
+    Serial.print(", ");
+    Serial.println(transmitterYawMapped);
+ 
+    Serial.print("PID Pitch: ");
+    Serial.print(errorPitch);
+    Serial.print(", ");
+    Serial.print(PpartPitch);
+    Serial.print(", ");
+    Serial.print(IpartPitch);
+    Serial.print(", ");
+    Serial.print(DpartPitch);
+    Serial.print(", ");
+    Serial.println(PIDPitch);
+    Serial.print("PID Roll: ");
+    Serial.print(errorRoll);
+    Serial.print(", ");
+    Serial.print(PpartRoll);
+    Serial.print(", ");
+    Serial.print(IpartRoll);
+    Serial.print(", ");
+    Serial.print(DpartRoll);
+    Serial.print(", ");
+    Serial.println(PIDRoll);
+    Serial.print("PID Yaw: ");
+    Serial.print(errorYaw);
+    Serial.print(", ");
+    Serial.print(PpartYaw);
+    Serial.print(", ");
+    Serial.print(IpartYaw);
+    Serial.print(", ");
+    Serial.print(DpartYaw);
+    Serial.print(", ");
+    Serial.println(PIDYaw);
+    Serial.print("Sample Time: ");
+    Serial.println(sampleTime);
+    */
+    printCounter = 0;
+  }
+  
+  
+  ////////////////////////////////////////////////////////
+  //Collect data for PID parameter analyzing
+  ////////////////////////////////////////////////////////
+  //Deactivate all other serial prints 
+  
+  /*
+  Serial.print(transmitterPitchMapped);
+  Serial.print(" ");
+  Serial.print(sensorPitch);
+  Serial.print(" ");
+  Serial.print(errorPitch);
+  Serial.print(" ");
+  Serial.print(PpartPitch);
+  Serial.print(" ");
+  Serial.print(IpartPitch);
+  Serial.print(" ");
+  Serial.print(DpartPitch);
+  Serial.print(" ");
+  Serial.print(PIDPitch);
+  Serial.print(" ");
+  Serial.print(transmitterRollMapped);
+  Serial.print(" ");
+  Serial.print(sensorRoll);
+  Serial.print(" ");
+  Serial.print(errorRoll);
+  Serial.print(" ");
+  Serial.print(PpartRoll);
+  Serial.print(" ");
+  Serial.print(IpartRoll);
+  Serial.print(" ");
+  Serial.print(DpartRoll);
+  Serial.print(" ");
+  Serial.print(PIDRoll);
+  Serial.print(" ");
+  Serial.print(transmitterYawMapped);
+  Serial.print(" ");
+  Serial.print(sensorYaw);
+  Serial.print(" ");
+  Serial.print(errorYaw);
+  Serial.print(" ");
+  Serial.print(PpartYaw);
+  Serial.print(" ");
+  Serial.print(IpartYaw);
+  Serial.print(" ");
+  Serial.print(DpartYaw);
+  Serial.print(" ");
+  Serial.print(PIDYaw);
+  
+  Serial.println();
+  */
+  
+}
