@@ -35,30 +35,27 @@ Servo ESCLeftFront;
 Servo ESCRightBack;
 Servo ESCLeftBack;
 
-int ESCRightFrontAddres = 0;
-int ESCLeftFrontAddres = 0;
-int ESCRightBackAddres = 0;
-int ESCLeftBackAddres = 0;
-
-float ESCRB;
-
 //System variables
 int printCounter = 0;
 long sampleTime;
 long sampleTimeOld;
 
+//Angle variables
+int referencePitchAngle = 0;
+float PitchAngle;
+int referenceRollAngle = 0;
+float RollAngle;
+float PitchAngleMapped;
+float RollAngleMapped;
+
 //DOF sensor variables
 float sensorYaw;
+float sensorYawDerivated;
+float sensorYawMapped;
 float sensorPitch;
-float sensorPitchMaped; // Egen
+float sensorPitchMapped; 
 float sensorRoll;
-
-float gyroPitch; // Egen
-float accelAngel;
-float gyroPitchAngle; // Egen
-float gyroPitchAngleMaped; // Egen
-float gyroAngle;
-long Pitch; // Egen
+float sensorRollMapped;
 
 float gx;
 float gy;
@@ -77,19 +74,19 @@ int adressThrottle = 8;
 long transmitterThrottleRaw = 0;
 long transmitterThrottleMapped = 0;
 
-int adressPitch = 0;
+int adressPitch = 7;
 long transmitterPitchRaw = 0;
 long transmitterPitchMapped = 0;
 
-int adressRoll = 0;
+int adressRoll = 12;
 long transmitterRollRaw = 0;
 long transmitterRollMapped = 0;
 
-int adressYaw = 0;
+int adressYaw = 13;
 long transmitterYawRaw = 0;
 long transmitterYawMapped = 0;
 
-int adressChannel5 = 0;
+int adressChannel5 = 5;
 boolean transmitterChannel5 = 0;
 
 float filterFactorTransmitter = 5;
@@ -104,47 +101,76 @@ long transmitterYawFiltered = 0;
 float errorPitch;
 float errorRoll;
 float errorYaw;
+float errorPitchAngle;
+float errorRollAngle;
 
 float errorPitchOld = 0;
 float errorRollOld = 0;
 float errorYawOld = 0;
+float errorPitchAngleOld = 0;
+float errorRollAngleOld = 0;
 
 float PIDPitch;
 float PIDRoll;
 float PIDYaw;
+float PIDPitchAngle;
+float PIDRollAngle;
 
-float KpPitch = 1;
-float KiPitch = 0.1;
+float KpPitch = 0.7;
+float KiPitch = 0;
 float KdPitch = 0;
 
-float KpRoll = 0;
+float KpRoll = 0.7;
 float KiRoll = 0;
 float KdRoll = 0;
 
-float KpYaw = 0;
+float KpYaw = 0.7;
 float KiYaw = 0;
 float KdYaw = 0;
+
+float KpPitchAngle = 1;
+float KiPitchAngle = 0;
+float KdPitchAngle = 0;
+
+float KpRollAngle = 1;
+float KiRollAngle = 0;
+float KdRollAngle = 0;
 
 float integralPitch = 0;
 float integralRoll = 0;
 float integralYaw = 0;
+float integralPitchAngle = 0;
+float integralRollAngle = 0;
 
 float PpartPitch;
 float PpartRoll;
 float PpartYaw;
+float PpartPitchAngle;
+float PpartRollAngle;
+
 float IpartPitch;
 float IpartRoll;
 float IpartYaw;
+float IpartPitchAngle;
+float IpartRollAngle;
+
 float DpartPitch;
 float DpartRoll;
 float DpartYaw;
+float DpartPitchAngle;
+float DpartRollAngle;
 
 int controlSignalRightFront;
 int controlSignalLeftFront;
 int controlSignalRightBack;
 int controlSignalLeftBack;
 
-float filterFactorDPart = 1;
+float filterFactorDPart = 8;
+float errorPitchFiltered = 0;
+float errorRollFiltered = 0;
+float errorYawFiltered = 0;
+float errorPitchAngleFiltered = 0;
+float errorRollAngleFiltered = 0;
 
 void setup()
 {
@@ -157,6 +183,12 @@ void setup()
 
   Serial.begin(57600); // Start serial at 9600 bps
   sampleTimeOld = millis();
+  
+
+  pinMode(adressThrottle, INPUT);
+  pinMode(adressPitch, INPUT);
+  pinMode(adressRoll, INPUT);
+  pinMode(adressYaw, INPUT);
 
   ////////////////////////////////////////////////////////
   //Initiate the DOF sensor
@@ -177,20 +209,24 @@ void setup()
   //Initiate the ESCs
   ////////////////////////////////////////////////////////
 
-  //-- //Declare the adress (pin) of the front right ESC
-  //-- //Declare the adress (pin) of the front left ESC
-  //-- //Declare the adress (pin) of the back right ESC
-  //-- //Declare the adress (pin) of the back left ESC
+  ESCRightFront.attach(10); // attaches the ECSRightFront on pin 10 to the servo object 
+  ESCRightBack.attach(6); // attaches the ECSRightFront on pin 6 to the servo object 
+  ESCLeftFront.attach(11); // attaches the ECSRightFront on pin 11 to the servo object 
+  ESCLeftBack.attach(9); // attaches the ECSRightFront on pin 9 to the servo object 
 
-  //-- //Start with zero speed command to the front right ESC
-  //-- //Start with zero speed command to the front left ESC
-  //-- //Start with zero speed command to the back right ESC
-  //-- //Start with zero speed command to the back left ESC
 
+
+  /*
+  controlSignalRightFront = 1000; //Start with zero speed command to the front right ESC
+   controlSignalLeftFront = 1000; //Start with zero speed command to the front left ESC
+   controlSignalRightBack = 1000; //Start with zero speed command to the back right ESC
+   controlSignalLeftBack = 1000; //Start with zero speed command to the back left ESC
+   */
 }
 
 void loop()
 {
+
   //Code in loop() function will execute repeatedly for as long as the CPU has power
 
   ////////////////////////////////////////////////////////
@@ -202,7 +238,7 @@ void loop()
   // gx, gy, and gz variables with the most current data.
   //--
 
-  dof.readGyro();
+  dof.readGyro(); 
 
   // To read from the accelerometer, you must first call the
   // readAccel() function. When this exits, it'll update the
@@ -220,26 +256,60 @@ void loop()
   //Interpret and calibrate sensor values
   ////////////////////////////////////////////////////////
 
-
-  sensorPitch = gx;
-  if(sensorPitch >= 1000) 
+  // Pitch
+  sensorPitch = gx; // Set sensorPitch
+  if(sensorPitch >= 100) // saturat sensorPitch between -100 & 100
   {
-    sensorPitch = 1000;
+    sensorPitch = 100;
   }
-  else if(sensorPitch <= -1000){
-    sensorPitch = -1000;
+  else if(sensorPitch <= -100){
+    sensorPitch = -100;
   }
-  sensorPitchMaped = map(sensorPitch,-100,100,-2000,2000);
-  //sensorPitch += 0;
+  sensorPitchMapped = map(sensorPitch,-100,100,1000,2000); // Transform degrees to a more usefull scale
+  sensorPitch += 0;
 
-  // sensorRoll = atan(ay/(sqrt((ax*ax)+(az*az))))*1278;
+  // Roll
+  sensorRoll = gy;
+  if(sensorRoll >= 100) 
+  {
+    sensorRoll = 100;
+  }
+  else if(sensorRoll <= -100){
+    sensorRoll = -100;
+  }
+  sensorRollMapped = map(sensorRoll,-100,100,1000,2000);
 
-  //sensorRoll += 0;
+  sensorRoll += 0;
 
-  //-- sensorYaw = ;
 
-  //  sensorYaw += 0;
+  // Yaw    
 
+  sensorYaw = atan(my/mx); // calculate an angle for sensorYaw
+
+  if(mx == 0)
+  {
+    if(my>0){
+      sensorYaw = 90;
+    }
+    else
+      sensorYaw = -90;
+  }
+
+  sensorYawDerivated = (1/1+((my/mx)*(my/mx))); // change unit from angle to angle/time
+
+  sensorYawMapped = map(sensorYaw,-180,180,1000,2000); 
+
+  // sensorYawMapped = 1500; // To simplify testing on Roll and Pitch axis
+
+  sensorYaw += 0;
+
+  // Pitch Angle
+  PitchAngle = atan(ax/(sqrt((ay*ay)+(az*az)))); // Caluclate PitchAngle in degrees
+  PitchAngleMapped = map(PitchAngle,-180,180,1000,2000); // Transform degrees to a more usefull scale
+
+  // Roll Angle
+  RollAngle = atan(ay/(sqrt((ax*ax)+(az*az))));
+  RollAngleMapped = map(RollAngle,-180,180,1000,2000);
 
 
   ////////////////////////////////////////////////////////
@@ -256,24 +326,35 @@ void loop()
   my = dof.calcMag(dof.my);
   mz = dof.calcMag(dof.my);
 
+  transmitterThrottleFiltered = (transmitterThrottleFiltered * (filterFactorTransmitter - 1) + transmitterThrottleRaw)/filterFactorTransmitter; // Filtering Throttle signals from the transmitter
+  transmitterPitchFiltered = (transmitterPitchFiltered * (filterFactorTransmitter - 1) + transmitterPitchRaw)/filterFactorTransmitter; 
+  transmitterRollFiltered = (transmitterRollFiltered * (filterFactorTransmitter - 1) + transmitterRollRaw)/filterFactorTransmitter; 
+  transmitterYawFiltered = (transmitterYawFiltered * (filterFactorTransmitter - 1) + transmitterYawRaw)/filterFactorTransmitter;
 
-  transmitterPitchFiltered = (transmitterPitchFiltered * (filterFactorTransmitter - 1) + transmitterPitchRaw)/filterFactorTransmitter;
 
   switch (pulseInSwitcher) {      
   case 1:
-    transmitterThrottleMapped = map(transmitterThrottleFiltered,1060,1915,-2000,2000);
+    transmitterThrottleRaw = pulseIn(adressThrottle, HIGH);
+    transmitterThrottleMapped = map(transmitterThrottleFiltered,1050,1915,1000,1700); // Reduce the Throttle signal so the regulators can work as expectet
+    //transmitterThrottleRaw = 1200; // To simplify testing whitout transmitter
     break;
   case 3:
-    //transmitterPitchMapped = map(transmitterPitchFiltered,1000,2000,-2000,2000); // Konstant -6000
-    transmitterPitchMapped = 1000; // Tillfällig sättning av transmittervärdet
+    transmitterPitchRaw = pulseIn(adressPitch, HIGH);
+    transmitterPitchMapped = map(transmitterPitchFiltered,1000,2000,1300,1700); // Reduce the Pitch signal to make the quadcopter more easy handled
+    //transmitterPitchRaw = 1500;
     break;
   case 5:
-    transmitterRollMapped = map(transmitterRollFiltered,1000,2000,-2000,2000);
+    transmitterRollRaw = pulseIn(adressRoll, HIGH);
+    transmitterRollMapped = map(transmitterRollFiltered,1000,2000,1300,1700);
+    //transmitterRollMapped = 1500;
     break;
   case 7:
-    transmitterYawMapped = map(transmitterYawFiltered,1000,2000,-2000,2000);
+    transmitterYawRaw = pulseIn(adressYaw, HIGH);
+    transmitterYawMapped = map(transmitterYawFiltered,1000,2000,1300,1700); 
+    //transmitterYawMapped = 1500;
     break;
   }
+
 
   ////////////////////////////////////////////////////////
   //System update
@@ -292,171 +373,202 @@ void loop()
   ////////////////////////////////////////////////////////
 
   //Regulator errors
-  errorPitch = transmitterPitchMapped - sensorPitchMaped;
-  //errorRoll = transmitterRollMapped - sensorRoll;
-  //errorYaw = errorYaw = transmitterYawMapped - sensorYaw;
+  errorPitch = transmitterPitchMapped - sensorPitchMapped; // Calculate the error between setpoint and sensorvalue
+  errorRoll = transmitterRollMapped - sensorRollMapped;
+  errorYaw = transmitterYawMapped - sensorYawMapped;
+  errorPitchAngle = referencePitchAngle - PitchAngle;
+  errorRollAngle = referenceRollAngle - RollAngle;
 
   //P-part
-  PpartPitch = KpPitch * errorPitch;
-  //PpartRoll = KpRoll * errorRoll;
-  //PpartYaw = KpYaw * errorYaw;
+  PpartPitch = KpPitch * errorPitch; // Calculate the Ppart
+  PpartRoll = KpRoll * errorRoll;
+  PpartYaw = KpYaw * errorYaw;
+  PpartPitchAngle = KpPitchAngle * errorPitchAngle;
+  PpartRollAngle = KpRollAngle * errorRollAngle;
 
   //I-part
   //Update integrals
-  integralPitch = integralPitch + (errorPitch * sampleTime);
-  //-- integralRoll = KpRoll * sampleTime;
-  //-- integralYaw = KpYaw * sampleTime;
+  integralPitch = integralPitch + ((transmitterPitchMapped - errorPitch) * sampleTime); // Calculate the integral
+  integralRoll = integralRoll + ((transmitterRollMapped - errorRoll) * sampleTime);
+  integralYaw = integralYaw + ((transmitterYawMapped - errorYaw) * sampleTime);
+  integralPitchAngle = integralPitchAngle + ((PitchAngleMapped - errorPitchAngle) * sampleTime);
+  integralRollAngle = integralRollAngle + ((RollAngleMapped - errorRollAngle) * sampleTime);
 
-  IpartPitch = KiPitch * integralPitch;
-  //-- IpartRoll = ;
-  //-- IpartYaw = ;
+  IpartPitch = KiPitch * integralPitch; // Calculate the Ipart
+  IpartRoll = KiRoll * integralRoll;
+  IpartYaw = KiYaw * integralYaw;
+  IpartPitchAngle = KiPitchAngle * integralPitchAngle;
+  IpartRollAngle = KiRollAngle * integralRollAngle;
 
   //Integral saturation
 
-/*
-  if (sensorPitch - transmitterPitchFiltered > 0.5 && sensorPitch - transmitterPitchFiltered < -0.5) {
+  //Reset integrals
+  // Pitch
+  if (transmitterPitchMapped - IpartPitch < 2 && transmitterPitchMapped - IpartPitch > -2) {  // Reset the integral if the Ipart is close to the setpoint
     integralPitch = 0;
   }
-  
   /*
-   if (IpartRoll > ) {
-   IpartRoll = ;
+  if (IpartPitch > transmitterPitchMapped) {
+   IpartPitch = -IpartPitch;
    }
-   else if (IpartRoll < ) {
-   IpartRoll = ;
+   else if (IpartPitch < transmitterPitchMapped) {
+   IpartPitch = IpartPitch;
    }
-   if (IpartYaw > ) {
-   IpartYaw = ;
+   */
+  // Roll
+  if (transmitterRollMapped - IpartRoll < 2 && transmitterRollMapped - IpartRoll > -2) {
+    integralRoll = 0;
+  }
+  /*
+  if (IpartRoll > transmitterRollMapped) {
+   IpartRoll = -IpartRoll;
    }
-   else if (IpartYaw < ) {
-   IpartYaw = ;
+   else if (IpartRoll < transmitterRollMapped) {
+   IpartRoll = IpartRoll;
+   }
+   */
+  // Yaw
+  if ( transmitterYawMapped - IpartYaw < 2 && transmitterYawMapped - IpartYaw > -2) {
+    integralYaw = 0;
+  }
+  /*
+  if (IpartYaw > transmitterYawMapped) {
+   IpartYaw = -IpartYaw;
+   }
+   else if (IpartYaw < transmitterYawMapped) {
+   IpartYaw = IpartYaw;
    }
    */
 
-  //Reset integrals
-  /*
-  if (IpartPitch == transmitterPitchFiltered) {
-    integralPitch = 0;
+  if (PitchAngleMapped - IpartPitchAngle < 2 && PitchAngleMapped - IpartPitchAngle > -2) {
+    integralPitchAngle = 0;
   }
-  /*
-  if (transmitterThrottleMapped <  ) {
-   integralPitch = 0;
-   integralRoll = 0;
-   integralYaw = 0;
-   }
-   */
+  if (RollAngleMapped - IpartRollAngle < 2 && RollAngleMapped - IpartRollAngle > -2) {
+    integralRollAngle = 0;
+  }
+
+
+
+  if (transmitterThrottleMapped < 1100 ) { // Resett the integral if the throttle is low
+    integralPitch = 0;
+    integralRoll = 0;
+    integralYaw = 0;
+    integralPitchAngle = 0;
+    integralRollAngle = 0;
+  }
+
 
   //D-part
-  //-- DpartPitch = (float) ;
-  //-- DpartRoll = (float) ;
-  //-- DpartYaw = (float) ;  
+  errorPitchFiltered = (errorPitchFiltered * (filterFactorDPart -1) + errorPitch)/filterFactorDPart; // Filtering the error befor it's beeing used for calculate the Dpart
+  errorRollFiltered = (errorRollFiltered * (filterFactorDPart -1) + errorRoll)/filterFactorDPart;
+  errorYawFiltered = (errorYawFiltered * (filterFactorDPart -1) + errorYaw)/filterFactorDPart;
+  errorPitchAngleFiltered = (errorPitchAngleFiltered * (filterFactorDPart -1) + errorPitchAngle)/filterFactorDPart;
+  errorRollAngleFiltered = (errorRollAngleFiltered * (filterFactorDPart -1) + errorRollAngle)/filterFactorDPart;
+
+  DpartPitch = KdPitch * ((errorPitchFiltered - errorPitchOld) / sampleTime); // Calculate the Dpart
+  DpartRoll = KdRoll * ((errorRollFiltered - errorRollOld) / sampleTime);
+  DpartYaw = KdYaw * ((errorYawFiltered - errorYawOld) / sampleTime);  
+  DpartPitchAngle = KdPitchAngle * ((errorPitchAngleFiltered - errorPitchAngleOld) / sampleTime); 
+  DpartRollAngle = KdRollAngle * ((errorRollAngleFiltered - errorRollAngleOld) / sampleTime); 
+
 
   //Update regulators
-  PIDPitch = PpartPitch;
-  //-- PIDRoll = ;
-  //-- PIDYaw = ;
+  PIDPitch = PpartPitch + IpartPitch + DpartPitch; // Add the separat parts to the PID regulator
+  PIDRoll = PpartRoll + IpartRoll + DpartPitch;
+  PIDYaw = PpartYaw + IpartYaw + DpartPitch;
+  PIDPitchAngle = PpartPitchAngle + IpartPitchAngle + DpartPitchAngle;
+  PIDRollAngle = PpartRollAngle + IpartRollAngle + DpartRollAngle;
 
   //Update derivatives
-  /*
+
   errorPitchOld = errorPitch;
-   errorRollOld = errorRoll;
-   errorYawOld = errorYaw;
-   */
+  errorRollOld = errorRoll;
+  errorYawOld = errorYaw;
+  errorPitchAngleOld = errorPitchAngle;
+  errorRollAngleOld = errorRollAngle;
+
 
   ////////////////////////////////////////////////////////
   //Control signals
   ////////////////////////////////////////////////////////
 
-  //-- controlSignalRightFront = (int) ;
-  //-- controlSignalLeftFront = (int) ;
-  //-- controlSignalRightBack = (int) ;
-  //-- controlSignalLeftBack = (int) ;
+  controlSignalRightFront = transmitterThrottleMapped + PIDPitch*0.3 - PIDRoll*0.3 + PIDYaw*0; // + PIDPitchAngle*0 + PIDRollAngle*0; // Sett the control signals and how the regulators shall affect eatch motor
+  controlSignalLeftFront = transmitterThrottleMapped + PIDPitch*0.3 + PIDRoll*0.3 - PIDYaw*0; // + PIDPitchAngle*0.1 - PIDRollAngle*0.1;
+  controlSignalRightBack = transmitterThrottleMapped - PIDPitch*0.3 - PIDRoll*0.3 - PIDYaw*0; // - PIDPitchAngle*0.1 + PIDRollAngle*0.1;
+  controlSignalLeftBack = transmitterThrottleMapped - PIDPitch*0.3 + PIDRoll*0.3 + PIDYaw*0; // - PIDPitchAngle*0.1 - PIDRollAngle*0.1;
 
   ////////////////////////////////////////////////////////
   //Control signal saturation check
   ////////////////////////////////////////////////////////
 
-  /*
-  if (controlSignalRightFront > ) {
-   controlSignalRightFront = ;
-   }
-   else if (controlSignalRightFront < ) {
-   controlSignalRightFront = ;
-   }
-   if (controlSignalLeftFront > ) {
-   controlSignalLeftFront = ;
-   }
-   else if (controlSignalLeftFront < ) {
-   controlSignalLeftFront = ;
-   }
-   if (controlSignalRightBack > ) {
-   controlSignalRightBack = ;
-   }
-   else if (controlSignalRightBack < ) {
-   controlSignalRightBack = ;
-   }
-   if (controlSignalLeftBack > ) {
-   controlSignalLeftBack = ;
-   }
-   else if (controlSignalLeftBack < ) {
-   controlSignalLeftBack = ;
-   }
-   */
+
+  if (controlSignalRightFront > 2000) { // Saturat the controlsignal so it dont override 2000
+    controlSignalRightFront = 2000 ;
+  }
+  else if (controlSignalRightFront < 1000) { // Saturat the controlsignal so it wont be less then 1000
+    controlSignalRightFront = 1000;
+  }
+  if (controlSignalLeftFront > 2000) {
+    controlSignalLeftFront = 2000;
+  }
+  else if (controlSignalLeftFront < 1000 ) {
+    controlSignalLeftFront = 1000;
+  }
+  if (controlSignalRightBack > 2000) {
+    controlSignalRightBack = 2000;
+  }
+  else if (controlSignalRightBack < 1000) {
+    controlSignalRightBack = 1000;
+  }
+  if (controlSignalLeftBack > 2000) {
+    controlSignalLeftBack = 2000;
+  }
+  else if (controlSignalLeftBack < 1000) {
+    controlSignalLeftBack = 1000;
+  }
+
 
   ////////////////////////////////////////////////////////
   //Safety functions
   ////////////////////////////////////////////////////////
-
-  /*
-   if (transmitterThrottleMapped < ) {
-   controlSignalRightFront = ;
-   controlSignalLeftFront = ;
-   controlSignalRightBack = ;
-   controlSignalLeftBack = ;
+  
+  if (transmitterThrottleMapped < 1100 ) { // Stop the power to  all propellers if throttle turns down
+   controlSignalRightFront = 1000;
+   controlSignalLeftFront = 1000;
+   controlSignalRightBack = 1000;
+   controlSignalLeftBack = 1000;
    }
-   */
+   
 
   ////////////////////////////////////////////////////////
   //ESC control signal write
   ////////////////////////////////////////////////////////
-       //  ESCRightFront = analogWrite(throttle + PIDpitch + PIDroll + PIDyaw);
-        ESCRB = (transmitterThrottleMapped + PIDPitch + PIDRoll + PIDYaw);
-        ESCRightBack.writeMicroseconds(ESCRightBackAddres, ESCRB);
-        ESCLB = (transmitterThrottleMapped + PIDPitch - PIDYaw);
-        
-        ESCRightFront = analogWrite(ESCRightFrontAddres, transmitterThrottleMapped + PIDRoll + PIDYaw);
-        ESCLeftFront = analogWrite(ESCLeftFrontAddres, transmitterThrottleMapped - PIDYaw);
-  //-- //Write speed command to the front right ESC
-  //-- //Write speed command to the front left ESC
-  //-- //Write speed command to the back right ESC
-  //-- //Write speed command to the back left ESC
 
+
+
+  ESCRightFront.write(controlSignalRightFront);
+  ESCLeftFront.write(controlSignalLeftFront);
+  ESCRightBack.write(controlSignalRightBack);
+  ESCLeftBack.write(controlSignalLeftBack);
   ////////////////////////////////////////////////////////
   //Print signal values
   ////////////////////////////////////////////////////////
 
   if (printCounter == 99) {
-    Serial.print(errorPitch);
-   Serial.print(" = ");
-  Serial.print(transmitterPitchMapped);
- Serial.print(" - ");
- Serial.print(sensorPitchMaped);
- 
-   Serial.print(integralPitch);
-    Serial.print("sensorPitchMaped: ");
-    Serial.println(sensorPitchMaped);
-    
-    /*
-    Serial.print("Ppart: ");
-     Serial.println(PpartPitch);
-     */
-    Serial.print("error pitch: ");
-    Serial.println(errorPitch);
 
-    
+
+    Serial.print("Right Front: ");
+    Serial.println(controlSignalRightFront);
+    Serial.print("Left Front: ");
+    Serial.println(controlSignalLeftFront);
+    Serial.print("Right Back: ");
+    Serial.println(controlSignalRightBack);
+    Serial.print("Left Back: ");
+    Serial.println(controlSignalLeftBack);
+
+    /*
      Serial.print("G: ");
-     Serial.print(gx);
-     /*
+     Serial.print(gx);    
      Serial.print(", ");
      Serial.print(gy);
      Serial.print(", ");
@@ -467,6 +579,7 @@ void loop()
      Serial.print(ay);
      Serial.print(", ");
      Serial.println(az);
+     
      Serial.print("M: ");
      Serial.print(mx);
      Serial.print(", ");
@@ -480,24 +593,21 @@ void loop()
      Serial.print("DOF Pitch: ");
      Serial.println(sensorPitch);
      
-     //Serial.print("DOF Roll: ");
-     //Serial.println(sensorRoll);
-     
+     Serial.print("DOF Roll: ");
+     Serial.println(sensorRoll);
+     */
+    Serial.print("Transmitter Thriottle Raw: ");
+    Serial.println(transmitterThrottleRaw);
+    Serial.print("Transmitter Throttle: ");
+    Serial.print(transmitterThrottleFiltered);
+    Serial.print(", ");
+    Serial.println(transmitterThrottleMapped);
+    Serial.println(" "); 
     /*
-     Serial.print("Transmitter Thriottle Raw: ");
-     Serial.println(transmitterThrottleRaw);
-     Serial.print("Transmitter Throttle: ");
-     Serial.print(transmitterThrottleFiltered);
-     Serial.print(", ");
-     Serial.println(transmitterThrottleMapped);
-     Serial.println(" ");
-     
      Serial.print("Transmitter Pitch: ");
-     Serial.print(transmitterPitchFiltered);
-     
+     Serial.print(transmitterPitchFiltered);     
      Serial.print(", ");
-     Serial.println(transmitterPitchMapped);
-     
+     Serial.println(transmitterPitchMapped);    
      Serial.print("Transmitter Roll: ");
      Serial.print(transmitterRollFiltered);
      Serial.print(", ");
@@ -507,27 +617,26 @@ void loop()
      Serial.print(", ");
      Serial.println(transmitterYawMapped);
      
-     Serial.print("PID Pitch: ");
+     Serial.print("PID Pitch - Error, Ppart, Ipart, Dpart: ");
      Serial.print(errorPitch);
-     
      Serial.print(", ");
      Serial.print(PpartPitch);
      Serial.print(", ");
-     */
-    Serial.print("IpartPitch: ");
-    Serial.print(IpartPitch);
-    Serial.println(", ");   // TA BORT LN!
-    Serial.println(" ");
-    /*
+     Serial.print("IpartPitch: ");
+     Serial.println(IpartPitch);    
+     Serial.print(", ");
      Serial.print(DpartPitch);
      Serial.print(", ");
      Serial.println(PIDPitch);
+     
      Serial.print("PID Roll: ");
      Serial.print(errorRoll);
      Serial.print(", ");
      Serial.print(PpartRoll);
      Serial.print(", ");
-     Serial.print(IpartRoll);
+     Serial.print("Ipart Roll: ");
+     Serial.println(IpartRoll);
+     
      Serial.print(", ");
      Serial.print(DpartRoll);
      Serial.print(", ");
@@ -537,7 +646,12 @@ void loop()
      Serial.print(", ");
      Serial.print(PpartYaw);
      Serial.print(", ");
-     Serial.print(IpartYaw);
+     
+     Serial.print("Ipart Yaw: ");
+     Serial.print(integralYaw);
+     Serial.println(IpartYaw);
+     Serial.println(" ");
+     
      Serial.print(", ");
      Serial.print(DpartYaw);
      Serial.print(", ");
@@ -545,63 +659,122 @@ void loop()
      
      Serial.print("Sample Time: ");
      Serial.println(sampleTime);
-    */
+     
+     Serial.print("PID PitchAngle: ");
+     Serial.print(errorPitchAngle);
+     Serial.print(", ");
+     Serial.print(PpartPitchAngle);
+     Serial.print(", ");
+     Serial.print("IpartPitchAngle: ");
+     Serial.println(IpartPitchAngle);    
+     Serial.print(", ");
+     Serial.print(DpartPitchAngle);
+     Serial.print(", ");
+     Serial.println(PIDPitchAngle);
+     
+     Serial.print("PID RollAngle: ");
+     Serial.print(errorRollAngle);
+     Serial.print(", ");
+     Serial.print(PpartRollAngle);
+     Serial.print(", ");
+     Serial.print("IpartRollAngle: ");
+     Serial.println(IpartRollAngle);    
+     Serial.print(", ");
+     Serial.print(DpartRollAngle);
+     Serial.print(", ");
+     Serial.println(PIDRollAngle); 
+     */
+
     printCounter = 0;
-  }
 
 
-  ////////////////////////////////////////////////////////
-  //Collect data for PID parameter analyzing
-  ////////////////////////////////////////////////////////
-  //Deactivate all other serial prints 
 
-  /*
+
+    ////////////////////////////////////////////////////////
+    //Collect data for PID parameter analyzing
+    ////////////////////////////////////////////////////////
+    //Deactivate all other serial prints 
+/*
+    
   Serial.print(transmitterPitchMapped);
-   Serial.print(" ");
-   Serial.print(sensorPitch);
-   Serial.print(" ");
-   Serial.print(errorPitch);
-   Serial.print(" ");
-   Serial.print(PpartPitch);
-   Serial.print(" ");
-   Serial.print(IpartPitch);
-   Serial.print(" ");
-   Serial.print(DpartPitch);
-   Serial.print(" ");
-   Serial.print(PIDPitch);
-   Serial.print(" ");
-   Serial.print(transmitterRollMapped);
-   Serial.print(" ");
-   Serial.print(sensorRoll);
-   Serial.print(" ");
-   Serial.print(errorRoll);
-   Serial.print(" ");
-   Serial.print(PpartRoll);
-   Serial.print(" ");
-   Serial.print(IpartRoll);
-   Serial.print(" ");
-   Serial.print(DpartRoll);
-   Serial.print(" ");
-   Serial.print(PIDRoll);
-   Serial.print(" ");
-   Serial.print(transmitterYawMapped);
-   Serial.print(" ");
-   Serial.print(sensorYaw);
-   Serial.print(" ");
-   Serial.print(errorYaw);
-   Serial.print(" ");
-   Serial.print(PpartYaw);
-   Serial.print(" ");
-   Serial.print(IpartYaw);
-   Serial.print(" ");
-   Serial.print(DpartYaw);
-   Serial.print(" ");
-   Serial.print(PIDYaw);
-   
-   Serial.println();
-   */
-
+     Serial.print(" ");
+     Serial.print(sensorPitch);
+     Serial.print(" ");
+     Serial.print(errorPitch);
+     Serial.print(" ");
+     Serial.print(PpartPitch);
+     Serial.print(" ");
+     Serial.print(IpartPitch);
+     Serial.print(" ");
+     Serial.print(DpartPitch);
+     Serial.print(" ");
+     Serial.print(PIDPitch);
+     Serial.print(" ");
+     Serial.print(transmitterRollMapped);
+     Serial.print(" ");
+     Serial.print(sensorRoll);
+     Serial.print(" ");
+     Serial.print(errorRoll);
+     Serial.print(" ");
+     Serial.print(PpartRoll);
+     Serial.print(" ");
+     Serial.print(IpartRoll);
+     Serial.print(" ");
+     Serial.print(DpartRoll);
+     Serial.print(" ");
+     Serial.print(PIDRoll);
+     Serial.print(" ");
+     Serial.print(transmitterYawMapped);
+     Serial.print(" ");
+     Serial.print(sensorYaw);
+     Serial.print(" ");
+     Serial.print(errorYaw);
+     Serial.print(" ");
+     Serial.print(PpartYaw);
+     Serial.print(" ");
+     Serial.print(IpartYaw);
+     Serial.print(" ");
+     Serial.print(DpartYaw);
+     Serial.print(" ");
+     Serial.print(PIDYaw);
+     Serial.println();
+     
+     Serial.print(PitchAngleMapped);
+     Serial.print(" ");
+     Serial.print(PitchAngle);
+     Serial.print(" ");
+     Serial.print(errorPitchAngle);
+     Serial.print(" ");
+     Serial.print(PpartPitchAngle);
+     Serial.print(" ");
+     Serial.print(IpartPitchAngle);
+     Serial.print(" ");
+     Serial.print(DpartPitchAngle);
+     Serial.print(" ");
+     Serial.print(PIDPitchAngle);
+     Serial.println();
+     
+     Serial.print(RollAngleMapped);
+     Serial.print(" ");
+     Serial.print(RollAngle);
+     Serial.print(" ");
+     Serial.print(errorRollAngle);
+     Serial.print(" ");
+     Serial.print(PpartRollAngle);
+     Serial.print(" ");
+     Serial.print(IpartRollAngle);
+     Serial.print(" ");
+     Serial.print(DpartRollAngle);
+     Serial.print(" ");
+     Serial.print(PIDRollAngle);
+     Serial.println();
+     */
+  }
 }
+
+
+
+
 
 
 
